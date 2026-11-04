@@ -114,23 +114,23 @@ int main(int argc, char *argv[])
     long trials_arg;
 
     if (argc != 3) {
-        fprintf(stderr, "Usage: ./tlb <pages> <trials>\\n");
+        fprintf(stderr, "Usage: ./tlb <pages> <trials>\n");
         return EXIT_FAILURE;
     }
 
     errno = 0;
     pages_arg = strtol(argv[1], &end, 10);
-    if (errno != 0 || end == argv[1] || *end != '\\0' ||
+    if (errno != 0 || end == argv[1] || *end != '\0' ||
         pages_arg < 1 || pages_arg > INT_MAX) {
-        fprintf(stderr, "Pages must be a positive integer.\\n");
+        fprintf(stderr, "Pages must be a positive integer.\n");
         return EXIT_FAILURE;
     }
 
     errno = 0;
     trials_arg = strtol(argv[2], &end, 10);
-    if (errno != 0 || end == argv[2] || *end != '\\0' ||
+    if (errno != 0 || end == argv[2] || *end != '\0' ||
         trials_arg < 1 || trials_arg > INT_MAX) {
-        fprintf(stderr, "Trials must be a positive integer.\\n");
+        fprintf(stderr, "Trials must be a positive integer.\n");
         return EXIT_FAILURE;
     }
 
@@ -139,12 +139,12 @@ int main(int argc, char *argv[])
     long page_size = sysconf(_SC_PAGESIZE);
 
     if (page_size <= 0) {
-        fprintf(stderr, "Could not determine the system page size.\\n");
+        fprintf(stderr, "Could not determine the system page size.\n");
         return EXIT_FAILURE;
     }
 
     if ((size_t)pages > SIZE_MAX / (size_t)page_size) {
-        fprintf(stderr, "Requested allocation is too large.\\n");
+        fprintf(stderr, "Requested allocation is too large.\n");
         return EXIT_FAILURE;
     }
 
@@ -163,13 +163,13 @@ int main(int argc, char *argv[])
     }
 
     double timer_step = estimate_timer_step_us();
-    printf("Pages: %d\\n", pages);
-    printf("Page size: %ld bytes\\n", page_size);
+    printf("Pages: %d\n", pages);
+    printf("Page size: %ld bytes\n", page_size);
     if (timer_step > 0.0) {
-        printf("Smallest observed timer increment: %.3f microseconds\\n",
+        printf("Smallest observed timer increment: %.3f microseconds\n",
                timer_step);
     } else {
-        printf("Timer increment could not be estimated.\\n");
+        printf("Timer increment could not be estimated.\n");
     }
 
     /* Calibrate repetitions to make each trial last about 20 ms. */
@@ -193,8 +193,8 @@ int main(int argc, char *argv[])
         repetitions = 10000000L;
     }
 
-    printf("Repetitions per trial: %ld\\n", repetitions);
-    printf("Trials: %d\\n", trials);
+    printf("Repetitions per trial: %ld\n", repetitions);
+    printf("Trials: %d\n", trials);
 
     for (int t = 0; t < trials; t++) {
         start = get_time_us();
@@ -204,11 +204,11 @@ int main(int argc, char *argv[])
         double total_accesses = (double)pages * (double)repetitions;
         double ns_per_access = (elapsed_us * 1000.0) / total_accesses;
 
-        printf("Trial %d: %.2f ns per page access (%.2f ms total)\\n",
+        printf("Trial %d: %.2f ns per page access (%.2f ms total)\n",
                t + 1, ns_per_access, elapsed_us / 1000.0);
     }
 
-    printf("Checksum: %llu\\n", result_sink);
+    printf("Checksum: %llu\n", result_sink);
     free((void *)array);
     return EXIT_SUCCESS;
 }
