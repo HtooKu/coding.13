@@ -1,214 +1,116 @@
-/*
- * OSTEP Chapter 19: The Translation Lookaside Buffer (TLB)
- * Homework questions 1, 2, 5, 6, and 7.
- *
- * Question 1:
- * gettimeofday() reports time in seconds and microseconds, but the
- * unit used to report time is not the same as guaranteed accuracy.
- * Its effective resolution depends on the operating system and
- * hardware. A single memory access takes only nanoseconds, which is
- * too short to measure reliably with this timer. Repeat the page
- * accesses in a loop so the total timed interval is much longer than
- * the timer's resolution (this program targets about 20 milliseconds),
- * then divide elapsed time by the number of page accesses. The program
- * also estimates the smallest positive time change observed across
- * repeated gettimeofday() calls on this machine.
- *
- * Question 2:
- * This program accepts the number of pages and number of trials as
- * command-line arguments. It allocates that many pages, accesses one
- * byte at the beginning of each page (using the system page size as
- * the stride), and reports the average nanoseconds per page access
- * for each trial. Example: ./tlb 16 10
- *
- * Question 5:
- * The memory is accessed through a pointer to volatile unsigned char.
- * Volatile makes each read an observable access, preventing the
- * compiler from deleting the page-access loop as dead code. The
- * values read are accumulated and stored in a volatile sink after
- * each timed run so the work has an observable result.
- *
- * Question 6:
- * On Linux, pin the process to one allowed CPU with taskset, for
- * example: taskset -c 2 ./tlb 16 10. Check which CPUs are available
- * with: taskset -pc $$
- * The CPU number must be in the process's allowed CPU set. In C,
- * sched_setaffinity() can also set CPU affinity. If the process
- * migrates between CPUs, it may use a different CPU's TLB. That CPU
- * may not have the needed translations cached, causing extra TLB
- * misses and noisier, less consistent measurements.
- *
- * Question 7:
- * Yes. The first access to a page can cause a page fault and require
- * the operating system to allocate and zero a physical page
- * (demand-zeroing). This first-touch cost would distort the timing.
- * The program writes to one byte on every page before starting the
- * timed trials, so the pages are allocated and initialized in advance.
- */
+// 1) The gettimeofday() measures time in microseconds. Though 
+// its precision depends on the OS and hardware.
+//Individual memory access can only take a few nanoseconds,which is much
+// shorter than the microsecond, so measuring a single page would be unreliable.
+//To get a more accurate measurement, I repeat page access multiple times in a loop
+//, measure elapse time total, and then divide by the toal number of access. This 
+// reduces the impact of timer resolution and measurement overhead. 
 
-#include <errno.h>
-#include <limits.h>
-#include <stdint.h>
+// 5) The compiler may remove a loop is it determines that the loop does not 
+//produce any results that are used elsewhere in program. 
+// To preent this, the memory array is declared as volatile. This tells the compiler
+// that memory access are obserable and shouldn't be removed. I also
+//use a checksum to combine all the values read from the array and print it after ward. 
+//This makes sure that the memory access are actually done. 
+
+// 6) CPU pinning can be used to keep a program running on one CPU.
+//    On Linux, the taskset command can restrict a program to a
+//    specific CPU core. For example: taskset -c 0 ./tlb 16 10.
+
+//    Without CPU pinning, the operating system scheduler may move
+//    the program between different CPUs. Since each CPU can have
+//    its own TLB, moving between CPUs can cause additional TLB
+//    misses and inconsistent timing measurements.
+
+// 7) Initialization can affect the time. When memory is access for the first
+// time, the OS may need to allocate physical memory and intialize at 0.
+// This is demand-zeroing and can cause issues. To stop it you can intialize one byte 
+// every page before starting the timer. This makes sure tahat the page was already accessed and 
+// the initial allocation costs are not included in timing experiment. 
+
+
+
+
+
+
+
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
 #include <unistd.h>
 
-static volatile unsigned long long result_sink = 0;
-
-/* Return current wall-clock time in microseconds. */
-static double get_time_us(void)
-{
+double get_time() {
     struct timeval tv;
+    gettimeofday(&tv, NULL);
 
-    if (gettimeofday(&tv, NULL) != 0) {
-        perror("gettimeofday");
-        exit(EXIT_FAILURE);
-    }
-
-    return (double)tv.tv_sec * 1000000.0 + (double)tv.tv_usec;
+    return tv.tv_sec *1000000.0 + tv.tv_usec;
 }
 
-/* Estimate timer granularity from the smallest positive observed delta. */
-static double estimate_timer_step_us(void)
-{
-    double previous = get_time_us();
-    double smallest = 0.0;
 
-    for (int i = 0; i < 10000; i++) {
-        double current = get_time_us();
-        double delta = current - previous;
+int main(int argc, char *argv[]){
 
-        if (delta > 0.0 && (smallest == 0.0 || delta < smallest)) {
-            smallest = delta;
-        }
-        previous = current;
+    if(argc != 3){
+        printf("Usage: ./tlb <pages> <trials>\n");
+        return 1;
+    }
+    
+    int pages = atoi(argv[1]);
+    int trials = atoi(argv[2]);
+
+    if (pages <= 0 || trials <= 0){
+        printf("Pages and trials must be positive.\n");
+        return 1;
+    }
+    int page_size = sysconf(_SC_PAGESIZE);
+    size_t size = (size_t)pages * page_size;
+
+    volatile unsigned char *array = malloc(size);
+
+    if (array == NULL){
+        printf(" Memory allocation failed. \n");
+        return 1;
+    }
+    
+    for (int i = 0; i < pages; i++) {
+        array[(size_t)i * page_size] = 1;
     }
 
-    return smallest;
-}
+    // Choose enough repetitions to make each trial measurable.
+    int repetitions = 10000;
 
-/* Read the first byte of every page repeatedly. */
-static unsigned long long access_pages(volatile unsigned char *array,
-                                       int pages,
-                                       long page_size,
-                                       long repetitions)
-{
-    unsigned long long sum = 0;
+    unsigned long long checksum = 0;
 
-    for (long r = 0; r < repetitions; r++) {
-        for (int p = 0; p < pages; p++) {
-            size_t offset = (size_t)p * (size_t)page_size;
-            sum += array[offset];
-        }
-    }
-
-    result_sink = sum;
-    return sum;
-}
-
-int main(int argc, char *argv[])
-{
-    char *end = NULL;
-    long pages_arg;
-    long trials_arg;
-
-    if (argc != 3) {
-        fprintf(stderr, "Usage: ./tlb <pages> <trials>\n");
-        return EXIT_FAILURE;
-    }
-
-    errno = 0;
-    pages_arg = strtol(argv[1], &end, 10);
-    if (errno != 0 || end == argv[1] || *end != '\0' ||
-        pages_arg < 1 || pages_arg > INT_MAX) {
-        fprintf(stderr, "Pages must be a positive integer.\n");
-        return EXIT_FAILURE;
-    }
-
-    errno = 0;
-    trials_arg = strtol(argv[2], &end, 10);
-    if (errno != 0 || end == argv[2] || *end != '\0' ||
-        trials_arg < 1 || trials_arg > INT_MAX) {
-        fprintf(stderr, "Trials must be a positive integer.\n");
-        return EXIT_FAILURE;
-    }
-
-    int pages = (int)pages_arg;
-    int trials = (int)trials_arg;
-    long page_size = sysconf(_SC_PAGESIZE);
-
-    if (page_size <= 0) {
-        fprintf(stderr, "Could not determine the system page size.\n");
-        return EXIT_FAILURE;
-    }
-
-    if ((size_t)pages > SIZE_MAX / (size_t)page_size) {
-        fprintf(stderr, "Requested allocation is too large.\n");
-        return EXIT_FAILURE;
-    }
-
-    size_t allocation_size = (size_t)pages * (size_t)page_size;
-    volatile unsigned char *array =
-        (volatile unsigned char *)malloc(allocation_size);
-
-    if (array == NULL) {
-        perror("malloc");
-        return EXIT_FAILURE;
-    }
-
-    /* Touch every page before timing to avoid first-touch costs. */
-    for (int p = 0; p < pages; p++) {
-        array[(size_t)p * (size_t)page_size] = 1;
-    }
-
-    double timer_step = estimate_timer_step_us();
     printf("Pages: %d\n", pages);
-    printf("Page size: %ld bytes\n", page_size);
-    if (timer_step > 0.0) {
-        printf("Smallest observed timer increment: %.3f microseconds\n",
-               timer_step);
-    } else {
-        printf("Timer increment could not be estimated.\n");
-    }
-
-    /* Calibrate repetitions to make each trial last about 20 ms. */
-    long calibration_repetitions = 100;
-    double start = get_time_us();
-    access_pages(array, pages, page_size, calibration_repetitions);
-    double calibration_elapsed = get_time_us() - start;
-
-    if (calibration_elapsed <= 0.0) {
-        calibration_elapsed = 1.0;
-    }
-
-    double microseconds_per_pass =
-        calibration_elapsed / (double)calibration_repetitions;
-    long repetitions = (long)(20000.0 / microseconds_per_pass);
-
-    if (repetitions < 1) {
-        repetitions = 1;
-    }
-    if (repetitions > 10000000L) {
-        repetitions = 10000000L;
-    }
-
-    printf("Repetitions per trial: %ld\n", repetitions);
+    printf("Page size: %d bytes\n", page_size);
     printf("Trials: %d\n", trials);
 
     for (int t = 0; t < trials; t++) {
-        start = get_time_us();
-        access_pages(array, pages, page_size, repetitions);
-        double elapsed_us = get_time_us() - start;
 
-        double total_accesses = (double)pages * (double)repetitions;
-        double ns_per_access = (elapsed_us * 1000.0) / total_accesses;
+        double start = get_time();
 
-        printf("Trial %d: %.2f ns per page access (%.2f ms total)\n",
-               t + 1, ns_per_access, elapsed_us / 1000.0);
+        for (int r = 0; r < repetitions; r++) {
+            for (int i = 0; i < pages; i++) {
+                checksum += array[(size_t)i * page_size];
+            }
+        }
+
+        double end = get_time();
+
+        double total_accesses =
+            (double)repetitions * pages;
+
+        double average_time =
+            (end - start) / total_accesses;
+
+        printf("Trial %d: %.4f microseconds per page access\n",
+               t + 1, average_time);
     }
 
-    printf("Checksum: %llu\n", result_sink);
+    printf("Checksum: %llu\n", checksum);
+
     free((void *)array);
-    return EXIT_SUCCESS;
+
+    return 0;
 }
